@@ -22,13 +22,14 @@
     <p class="failed">Oops, that username and password don't match any of our users!</p>
     {% endif %}
     <p>Enter your username and password to log in:</p>
-    <form method="POST" action="">
-      <input name="username"></input>
+    <form method="POST" action="/login">
+      <input type="text" name="username" placeholder="Username" required>
       <label for="username">Username</label>
-      <input type="password" name="password">
+      <input type="password" name="password" placeholder="Password" required>
       <label for="password">Password</label>
       <button type="submit">Submit</button>
     </form>
+    
   </div>
 
 </div>

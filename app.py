@@ -4,7 +4,7 @@ import traceback
 import random
 import sqlite3
 from datetime import datetime
-from flask import * # Flask, g, redirect, render_template, request, url_for
+from flask import *
 from functools import wraps
 
 app = Flask(__name__)
@@ -63,17 +63,15 @@ def new_user():
     return u
 
 def get_user_from_cookie(request):
-    cookie = request.cookies.get('watch_party_cookie')
-    if cookie:
-        return query_db('select * from users where cookie = ?', [cookie], one=True)
-    return None
+    user_id, password = request.cookies.get('user_id'), request.cookies.get('user_password')
+    return query_db('select * from users where id = ? and password = ?', (user_id, password), one=True) if user_id and password else None
 
 def render_with_error_handling(template, **kwargs):
     try:
         return render_template(template, **kwargs)
-    except:
-        t = traceback.format_exc()
-        return render_template('error.html', args={"trace": t}), 500
+    except Exception as e:
+        return render_template('error.html', error=str(e), traceback=traceback.format_exc()), 500
+
 
 # ------------------------------ NORMAL PAGE ROUTES ----------------------------------
 
@@ -97,31 +95,24 @@ def create_room():
     if (request.method == 'POST'):
         name = "Unnamed Room " + ''.join(random.choices(string.digits, k=6))
         room = query_db('insert into rooms (name) values (?) returning id', [name], one=True)            
-        return redirect(f'{room["id"]}')
+        return redirect(f'/rooms/{room["id"]}') # Look this up
     else:
         return app.send_static_file('create_room.html')
 
+
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    print("signup")
     user = get_user_from_cookie(request)
-
     if user:
         return redirect('/profile')
-        # return render_with_error_handling('profile.html', user=user) # redirect('/')
-    
     if request.method == 'POST':
         u = new_user()
-        print("u")
-        print(u)
-        for key in u.keys():
-            print(f'{key}: {u[key]}')
-
         resp = redirect('/profile')
-        resp.set_cookie('watch_party_cookie', str(u['cookie']))
+        resp.set_cookie('user_id', str(u['id']))
+        resp.set_cookie('user_password', u['password'])
         return resp
-    
     return redirect('/login')
+
 
 @app.route('/profile')
 def profile():
@@ -130,34 +121,36 @@ def profile():
     if user:
         return render_with_error_handling('profile.html', user=user)
     
-    redirect('/login')
+    return redirect('/login')
 
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    print("login")
-    user = get_user_from_cookie(request)
-
-    if user:
-        return redirect('/')
-    
     if request.method == 'POST':
-        name = request.form['name']
-        password = request.form['password']
-        u = query_db('select * from users where name = ? and password = ?', [name, password], one=True)
+        name = request.form.get('username') 
+        password = request.form.get('password')
+        user = query_db('select * from users where name = ? and password = ?', [name, password], one=True)
         if user:
-            resp = make_response(redirect("/"))
-            resp.set_cookie('user_id', u.id)
-            resp.set_cookie('user_password', u.password)
-            return resp
+            response = redirect('/')
+            response.set_cookie('user_id', str(user['id']), httponly=True)
+            response.set_cookie('user_password', user['password'], httponly=True)
+            return response
+        else:
+            return render_with_error_handling('login.html', failed=True)
+    return render_with_error_handling('login.html')
 
-    return render_with_error_handling('login.html', failed=True)   
 
 @app.route('/logout')
 def logout():
-    resp = make_response(redirect('/'))
-    resp.set_cookie('watch_party_cookie', '')
+    resp = redirect('/')
+    resp.set_cookie('user_id', '')
+    resp.set_cookie('user_password', '')
     return resp
+
+def get_max_msg_id():
+    result = query_db('select max(id) as max_id from messages', one=True)
+    return result['max_id'] if result else 0
+
 
 @app.route('/rooms/<int:room_id>')
 def room(room_id):
@@ -170,15 +163,88 @@ def room(room_id):
 
 # -------------------------------- API ROUTES ----------------------------------
 
-# POST to change the user's name
-@app.route('/api/user/name')
-def update_username():
-    return {}, 403
+def authenticateUser(request):
+    api_key = request.headers.get('Api-Key')
+    if not api_key:
+        return None
+    
+    user = query_db('SELECT * FROM users WHERE api_key = ?', [api_key], one=True)
+    return user
 
-# POST to change the user's password
+# POST to change the user's name
+@app.route('/api/username/change', methods = ["POST"])
+def change_username():
+    authenticated_user = authenticateUser(request)
+    if not authenticated_user:
+        return jsonify({"message":  "Unauthorized Access: Invalid API Key"}), 401
+    oldUsername = request.json.get("username")
+    if oldUsername:
+        query_db("UPDATE users SET name = ? WHERE id = ?", [oldUsername, authenticated_user["id"]])
+        response = make_response(redirect('/profile'))
+        response.set_cookie('user_id', oldUsername)
+        return {}
+    return jsonify({"error": "Username Required"}), 400
+
+
+@app.route('/api/password/change', methods=['POST'])
+def change_password():
+    user = authenticateUser(request)
+    if not user:
+        return {'message': 'Invalid API Key'}, 401
+    new_password = request.json.get('password')
+    if new_password:
+        query_db('update users set password = ? where id = ?', (new_password, user['id']))
+        resp = make_response({'pass':'Password set successfully!'})
+        resp.set_cookie('user_password', new_password)
+        return resp
+    return {'message': 'Missing new password'}, 400
+
 
 # POST to change the name of a room
+@app.route("/api/room/name/change", methods=['POST'])
+def change_room_name():
+    authenticated_user = authenticateUser(request)
+    if not authenticated_user:
+        return jsonify({"messsage": "Unauthorized Access: Invalid API key"}), 401
+    oldroomID = request.json.get("room_id")
+    newroomName = request.json.get("name")
+    if oldroomID and newroomName:
+        query_db("UPDATE rooms SET name = ? where id = ?", [newroomName, oldroomID])
+        return jsonify({"message": "Room name updated succesfully"}), 200
+    return jsonify({"error": "Room ID and new room name are required"}), 400
 
 # GET to get all the messages in a room
+@app.route('/api/room/messages', methods=['GET'])
+def get_chat_messages():
+    output = {}
+    user = authenticateUser(request)
+    if user:
+        if request.method == 'GET':
+            room_id = request.args['room_id']
+            messages = query_db('select msg.id, u.name, msg.body from messages msg, users u '
+                        'where msg.room_id = ? and msg.user_id = u.id order by msg.id', [room_id], one=False)
+            if not messages:
+                return output
+            for msg in messages:
+                output[msg[0]] = {'id': msg[0], 'name': msg[1], 'body': msg[2]}
+        return output, 200
+    else:
+        return render_template('error.html', args={"trace: ": 'Invalid User Credentials'}), 401
+    return {'Status': 'Something went wrong!!'}, 403
 
 # POST to post a new message to a room
+@app.route("/api/message/post", methods = ["POST"])
+def  post_message():
+    authenticated_user = authenticateUser(request)
+    if not authenticated_user:
+        return jsonify({"message": "Unauthorized Access: Invalid API key"}), 401
+    roomId = request.json.get("room_id")
+    messageContent = request.json.get("body")
+    if roomId and messageContent:
+        query_db("INSERT INTO messages (room_id, user_id, body) VALUES (?, ?,?)", [roomId, authenticated_user["id"], messageContent])
+        return jsonify({"message": "Message sent Succesfully"}), 200
+    return jsonify({"error": "Room ID and message content required"}), 400
+
+if  __name__ == '__main__':
+    app.run(debug = True)
+

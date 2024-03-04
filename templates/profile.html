@@ -5,13 +5,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" type="text/css" href="/static/style.css"></link>
-  <script src="/static/script.js"></script>
+  
+  <!-- Look this up -->
   <script>
     {% if user %}
     WATCH_PARTY_USER_ID = {{ user.id }};
     WATCH_PARTY_API_KEY = '{{ user.api_key }}';
     {% endif %}
   </script>
+  <script src="/static/script.js"></script> 
 </head>
 <body>
 <div class="container">
@@ -20,11 +22,11 @@
     <h2>Welcome to Watch Party!</h2>
     <div class="profileDetails">
       <label  class="username" for="username">Your username is: </label>
-      <input  class="username" name="username" class="mono" value="{{ user.name }}">
-      <button class="username">Update</button>
+      <input  class="username" name="username" id="username" class="mono" value="{{ user.name }}">
+      <button class="username" onclick="changeUsername(document.getElementById('username').value)">Update</button>
       <label  class="password" for="password">Your password is: </label>
-      <input  class="password" name="password" class="mono" value="{{ user.password }}">
-      <button class="password">Update</button>
+      <input  class="password" name="password" id = "password" class="mono" value="{{ user.password }}">
+      <button class="password" onclick="changePassword(document.getElementById('password').value)">Update</button>
     </div>
     <p>
       Your user ID and API Key are available on every page as the javascript variables
